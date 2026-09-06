@@ -7,6 +7,9 @@ import { PrismaClient } from '@prisma/client';
 import { AI_RATE_LIMIT_MESSAGE, extractTransaction, extractTransactionAudio } from './services/ai.js';
 
 const port = Number(process.env.PORT || 3333);
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET precisa estar definido em producao (defina a variavel de ambiente antes de iniciar o servidor).');
+}
 const jwtSecret = process.env.JWT_SECRET || 'fintrack-development-secret';
 const prisma = new PrismaClient();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -30,6 +33,7 @@ const readBody = async (request) => {
   return body ? JSON.parse(body) : {};
 };
 
+const todayDateOnly = () => new Date().toISOString().slice(0, 10);
 const trialStatus = (user) => {
   const remainingMs = Math.max(0, new Date(user.trialEndsAt).getTime() - Date.now());
   return {
@@ -131,7 +135,7 @@ const server = createServer(async (request, response) => {
           amount: Number(extracted.amount),
           type: extracted.type === 'INCOME' ? 'income' : 'expense',
           category: extracted.category,
-          date: extracted.date ? new Date(extracted.date).toISOString() : new Date().toISOString()
+          date: extracted.date ? String(extracted.date).slice(0, 10) : todayDateOnly()
         } });
         return send(response, 201, { transactions: [toClientTransaction(transaction)] });
       } catch (error) {
@@ -140,6 +144,7 @@ const server = createServer(async (request, response) => {
         return send(response, 500, { error: 'Nao foi possivel processar a entrada com a IA.' });
       }
     }
+    // Usada pelo widget nativo Android (FloatingInputActivity/QuickActionsWidget), nao pelo app web.
     if (url.pathname === '/api/transactions/quick-add' && request.method === 'POST') {
       const user = await requireUser(request, response);
       if (!user) return;
@@ -154,7 +159,7 @@ const server = createServer(async (request, response) => {
           amount: Number(extracted.amount),
           type: extracted.type === 'INCOME' ? 'income' : 'expense',
           category: extracted.category,
-          date: extracted.date ? new Date(extracted.date).toISOString() : new Date().toISOString()
+          date: extracted.date ? String(extracted.date).slice(0, 10) : todayDateOnly()
         } });
         const typeLabel = transaction.type === 'income' ? 'Ganho' : 'Despesa';
         return send(response, 201, { transaction: toClientTransaction(transaction), message: `${typeLabel} adicionado com sucesso!` });
@@ -180,15 +185,14 @@ const server = createServer(async (request, response) => {
         if (!extracted || !String(extracted.description || '').trim() || !Number.isFinite(amount) || amount <= 0 || !['INCOME', 'EXPENSE'].includes(normalizedType)) {
           throw new Error('A IA retornou uma transacao invalida');
         }
-        const candidateDate = extracted.date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.date) ? new Date(`${extracted.date}T00:00:00.000Z`) : new Date();
-        const parsedDate = Number.isNaN(candidateDate.getTime()) ? new Date() : candidateDate;
+        const date = extracted.date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.date) ? extracted.date : todayDateOnly();
         return {
           userId: user.id,
           description: extracted.description.trim(),
           amount,
           type: normalizedType === 'INCOME' ? 'income' : 'expense',
           category: String(extracted.category || 'Outros').trim(),
-          date: parsedDate.toISOString()
+          date
         };
       });
       const transactions = await Promise.all(transactionData.map((data) => prisma.transaction.create({ data })));
@@ -199,8 +203,8 @@ const server = createServer(async (request, response) => {
       if (!user) return;
       if (!requireAccess(user, response)) return;
       const input = await readBody(request);
-      if (!input.description || !Number(input.amount) || !['income', 'expense'].includes(input.type)) {
-        return send(response, 400, { error: 'description, amount e type sao obrigatorios' });
+      if (!input.description || !(Number(input.amount) > 0) || !['income', 'expense'].includes(input.type)) {
+        return send(response, 400, { error: 'description e type sao obrigatorios, e amount deve ser um numero positivo' });
       }
       const transaction = await prisma.transaction.create({ data: {
         userId: user.id,
@@ -208,7 +212,7 @@ const server = createServer(async (request, response) => {
         amount: Number(input.amount),
         type: input.type,
         category: String(input.category || 'Outros').trim(),
-        date: input.date || new Date().toISOString().slice(0, 10)
+        date: input.date ? String(input.date).slice(0, 10) : todayDateOnly()
       } });
       return send(response, 201, toClientTransaction(transaction));
     }

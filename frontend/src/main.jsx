@@ -11,16 +11,20 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const API_URL = 'https://capable-adaptation-production-7733.up.railway.app';
+const API_URL = import.meta.env.VITE_API_URL || 'https://capable-adaptation-production-7733.up.railway.app';
 const API_ROOT = `${API_URL}/api`;
 const AI_RATE_LIMIT_MESSAGE = 'Limite temporário de requisições da IA atingido. Por favor, aguarde 30 segundos e tente novamente.';
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const transactionDate = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
+// selectedMonth é um Date local genuíno (dia 1 do mês exibido), então getters locais são corretos aqui.
 const monthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+// transaction.date é sempre uma string "YYYY-MM-DD" vinda do backend: comparamos a string direto
+// para não sofrer o deslocamento de fuso horário que "new Date(dataOnly)" (interpretada como UTC) causa em UTC-3.
+const transactionMonthKey = (value) => String(value).slice(0, 7);
+const localDateInput = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const formatTransactionDate = (value) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Data indisponível' : transactionDate.format(date).replace(', ', ' às ');
+  const [year, month, day] = String(value).slice(0, 10).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : 'Data indisponível';
 };
 const transactionIcon = (category, type) => {
   if (type === 'income' || category === 'Trabalho & Renda') return BriefcaseBusiness;
@@ -190,7 +194,7 @@ function App() {
   };
 
   const openTransactionModal = (type) => {
-    setTransactionModal({ type, description: '', amount: '', category: 'Outros', date: new Date().toISOString().slice(0, 10) });
+    setTransactionModal({ type, description: '', amount: '', category: 'Outros', date: localDateInput() });
   };
 
   useEffect(() => {
@@ -229,7 +233,7 @@ function App() {
   };
 
   const selectedMonthKey = monthKey(selectedMonth);
-  const filteredTransactions = transactions.filter((transaction) => monthKey(new Date(transaction.date)) === selectedMonthKey);
+  const filteredTransactions = transactions.filter((transaction) => transactionMonthKey(transaction.date) === selectedMonthKey);
   const summary = filteredTransactions.reduce((totals, transaction) => {
     if (transaction.type === 'income') totals.income += Number(transaction.amount);
     if (transaction.type === 'expense') totals.expenses += Number(transaction.amount);
@@ -243,7 +247,7 @@ function App() {
 
   return <main className="app-shell">
     <header className="topbar"><div className="brand"><div className="brand-mark"><WalletCards size={21} /></div><span>fintrack</span></div><div className="topbar-actions"><div className={`trial-badge ${account?.isPro ? 'pro' : account?.trialExpired ? 'expired' : ''}`}><Crown size={14} /> {accountBadge}</div><div className="period"><CalendarDays size={16} /> {monthName.format(selectedMonth)}</div><button className="logout-button" title="Sair" onClick={() => { localStorage.removeItem('fintrack_token'); localStorage.removeItem('fintrack_user'); Preferences.remove({ key: 'auth_token' }); setToken(null); }}><LogOut size={16} /><span>Sair</span></button></div></header>
-      <form className="quick-entry" onSubmit={submitQuickEntry}><div className="quick-entry-heading"><Sparkles size={18} /><div><p className="eyebrow">Registro inteligente</p><h2>O que aconteceu?</h2></div></div><div className="quick-entry-control"><input required value={quickEntry} onChange={(event) => { setQuickEntry(event.target.value); setFeedback(''); }} placeholder="Ex: almoço 35 no débito, salário 4000" aria-label="Descreva suas transacoes" /><button className="quick-entry-button" disabled={saving} title="Enviar entrada rápida">{saving ? <LoaderCircle className="spin" size={19} /> : <Send size={19} />}<span>Registrar</span></button><button type="button" className={`microphone-button ${recording ? 'recording' : ''}`} onClick={toggleRecording} disabled={saving} title={recording ? 'Parar gravação' : 'Registrar por voz'} aria-label={recording ? 'Parar gravação' : 'Registrar por voz'}>{recording ? <Square size={18} fill="currentColor" /> : <Mic size={20} />}</button></div>{feedback && <p className={`quick-feedback ${recording ? 'listening' : ''}`}>{feedback}</p>}</form>
+      <form className="quick-entry" onSubmit={submitQuickEntry}><div className="quick-entry-heading"><Sparkles size={18} /><div><p className="eyebrow">Registro inteligente</p><h2>O que aconteceu?</h2></div></div><div className="quick-entry-control"><input required value={quickEntry} onChange={(event) => { setQuickEntry(event.target.value); setFeedback(''); }} placeholder="Ex: almoço 35 no débito (uma transação por vez)" aria-label="Descreva suas transacoes" /><button className="quick-entry-button" disabled={saving} title="Enviar entrada rápida">{saving ? <LoaderCircle className="spin" size={19} /> : <Send size={19} />}<span>Registrar</span></button><button type="button" className={`microphone-button ${recording ? 'recording' : ''}`} onClick={toggleRecording} disabled={saving} title={recording ? 'Parar gravação' : 'Registrar por voz'} aria-label={recording ? 'Parar gravação' : 'Registrar por voz'}>{recording ? <Square size={18} fill="currentColor" /> : <Mic size={20} />}</button></div>{feedback && <p className={`quick-feedback ${recording ? 'listening' : ''}`}>{feedback}</p>}</form>
     <section className="intro"><div><p className="eyebrow">Visao geral</p><h1>Seu dinheiro,<br /><em>mais claro.</em></h1><p className="subcopy">Acompanhe o que entra, o que sai e o que realmente importa.</p></div><div className="balance-panel"><span>Saldo disponivel</span><strong>{money.format(summary.balance)}</strong><small><Check size={14} /> atualizado agora</small></div></section>
     {error && <div className="notice" role="alert">{error}</div>}
     <div className="month-selector" aria-label="Filtrar transações por mês"><button type="button" onClick={() => changeMonth(-1)} aria-label="Mês anterior" title="Mês anterior"><ChevronLeft size={20} /></button><strong>{monthName.format(selectedMonth)}</strong><button type="button" onClick={() => changeMonth(1)} aria-label="Próximo mês" title="Próximo mês"><ChevronRight size={20} /></button></div>

@@ -48,7 +48,7 @@ const rateLimitError = () => Object.assign(new Error(AI_RATE_LIMIT_MESSAGE), { s
 
 const generateWithTimeout = (contents) => Promise.race([
   ai.models.generateContent({
-    model: 'gemini-3.6-flash',
+    model: 'gemini-2.5-flash',
     contents,
     config: {
       responseMimeType: 'application/json',
@@ -156,7 +156,7 @@ export const extractTransaction = async (text) => {
     return JSON.parse(response.text);
   } catch (error) {
     if (is429(error)) throw rateLimitError();
-    if (is503(error) || isTimeout(error)) return localExtract(text);
+    console.error('[Gemini] Falha na extracao, usando fallback local:', error);
     return localExtract(text);
   }
 };
